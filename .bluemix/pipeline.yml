@@ -18,14 +18,11 @@ stages:
   triggers:
   - type: stage
   properties:
-  - name: CF_APP_NAME
-    value: undefined
-    type: text
-  - name: APP_URL
-    value: undefined
+  - name: BIND_TO
+    value: ${BIND_TO}
     type: text
   jobs:
-  - name: Blue-Green Deploy
+  - name: Deploy ${CF_APP_NAME}
     type: deployer
     target:
       region_id: ${PROD_REGION_ID}
@@ -34,28 +31,42 @@ stages:
       application: ${CF_APP_NAME}
     script: |
       #!/bin/bash
-      # Push app
-      if ! cf app $CF_APP; then
-        cf push $CF_APP
+      echo appName "${CF_APP}"
+      echo organization "${CF_ORG}"
+      echo space "${CF_SPACE}"
+      echo url "${CF_TARGET_URL}"
+      echo serviceId "${BIND_TO}"
+      serviceJson=`cf curl /v2/service_instances/${serviceId}`
+      echo serviceJson "${serviceJson}"
+      errorCode=`echo ${serviceJson} | grep -Po '(?<="error_code": ")[^"]*' || true`
+      echo errorCode ${errorCode}
+      if [[ -z $errorCode ]]
+      then
+       serviceName=`echo ${serviceJson} | grep -Po '(?<="name": ")[^"]*' || true`
+       echo serviceName "${serviceName}"
+       if [[ ! -z $serviceName ]]
+       then
+        serviceInfo=`cf service "${serviceName}" || true`
+        echo serviceInfo "${serviceInfo}"
+        serviceLabel=`echo ${serviceInfo} | awk '{for (I=1;I<=NF;I++) if ($I == "Service:") {print $(I+1)};}'`
+        echo serviceLabel "${serviceLabel}"
+        if [[ ! -z $serviceLabel ]]
+        then
+         sed -i '$ a \  services:' manifest.yml
+         sed -i "$ a \  - ${serviceName}" manifest.yml
+         sed -i '$ a \  env:' manifest.yml
+         sed -i "$ a \    PA_SERVICE_LABEL: ${serviceLabel}" manifest.yml
+        else
+         echo "The problem occured when retrieving the serviceLabel. The service will not be bound to the app."
+        fi
+       else
+         echo "The problem occured when retrieving the serviceName. The service will not be bound to the app."
+       fi
       else
-        OLD_CF_APP=${CF_APP}-OLD-$(date +"%s")
-        rollback() {
-          set +e
-          if cf app $OLD_CF_APP; then
-            cf logs $CF_APP --recent
-            cf delete $CF_APP -f
-            cf rename $OLD_CF_APP $CF_APP
-          fi
-          exit 1
-        }
-        set -e
-        trap rollback ERR
-        cf rename $CF_APP $OLD_CF_APP
-        cf push $CF_APP
-        cf delete $OLD_CF_APP -f
+        echo "The problem occured when retrieving the serviceName. The service will not be bound to the app."
       fi
-      # Export app name and URL for use in later Pipeline jobs
-      export CF_APP_NAME="$CF_APP"
-      export APP_URL=http://$(cf app $CF_APP_NAME | grep urls: | awk '{print $2}')
+      echo manifest.yml
+      cat manifest.yml
+      cf push "${CF_APP}"
       # View logs
       #cf logs "${CF_APP}" --recent

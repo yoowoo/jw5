@@ -41,6 +41,7 @@ services:
           $text: pipeline.yml
         env:
           SAMPLE_REPO: repo
+          BIND_TO: '{{serviceId}}'
           BRANCH: '{{branch}}'
           CF_APP_NAME: '{{form.pipeline.parameters.prod-app-name}}'
           PROD_SPACE_NAME: '{{form.pipeline.parameters.prod-space}}'
